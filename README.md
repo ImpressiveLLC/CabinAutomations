@@ -59,3 +59,34 @@ devices are paired in Zigbee2MQTT and renamed to match:
 
 Separately ordered: a Reolink PoE camera for outdoor coverage (not part
 of the Zigbee mesh).
+
+## Order confirmed
+
+First hardware round ordered 2026-07-18 via sonoff.tech (order #sn42122,
+$180.03 after SOANNI30 discount) and Amazon. Expected processing Monday;
+cabin lost power/connectivity same day, so pairing is on hold until both
+resolve.
+
+## Key hardware decisions
+
+- **ZBMINIR2** over ZBMINIL2 for the entry light — confirmed neutral
+  wiring available, so the neutral-required router-capable switch made
+  more sense than the no-neutral end-device version.
+- **THIRDREALITY Drip Detect** leak sensors over the cheaper Gen2 (WL2)
+  variant — Gen2 drops the 120dB local siren entirely, which defeats the
+  original requirement (audible alarm independent of HA/internet).
+- **THIRDREALITY Smart Plug Gen3** over Gen2 — stronger repeater/RF
+  module, and firmware updates that don't interrupt power (relevant for
+  the heater and deterrent plugs specifically).
+- **Zigbee clamp-on valve actuator** on the main shutoff instead of a
+  full smart water monitor system (Moen Flo, etc.) — ~$35-70 vs.
+  $330-550+, and the flow-metering those systems add isn't needed since
+  leak detection is already handled by the Zigbee sensors.
+- The spare THIRDREALITY leak sensor's `water_leak_buzzer` (separate
+  Zigbee2MQTT-exposed property from `water_leak` detection) is
+  repurposed as an intrusion-deterrence siren — confirmed this doesn't
+  create false leak alerts since the two properties are independent.
+
+## Repo
+
+https://github.com/smrekarfamilia-sudo/CabinSensorAutomationDetection
