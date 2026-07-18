@@ -1,0 +1,433 @@
+# =============================================================================
+# Leak + Freeze Detection Automations
+# For: SONOFF SNZB-05P (leak), THIRDREALITY water leak (leak), 
+#      SONOFF SNZB-02WD / SNZB-02LD (temperature)
+# Paired via Zigbee2MQTT on the M920q cabin stack
+# =============================================================================
+#
+# PAIRING FIRST (no devices paired yet):
+# 1. Open the Zigbee2MQTT frontend (usually http://<m920q-ip>:8080) or the
+#    Z2M panel inside Home Assistant.
+# 2. Click "Permit join (all)" — it stays open for ~254s by default.
+# 3. Pop the battery cover / hold the reset pin on each sensor for ~5s until
+#    the LED blinks, one device at a time. Wait for it to show up in Z2M
+#    before starting the next one — Zigbee join storms are the #1 cause of
+#    "device not found" headaches.
+# 4. In Z2M, rename each device's "Friendly name" as you pair it, e.g.:
+#      leak_bosch_washer
+#      leak_lg_washer
+#      leak_liebherr_fridge
+#      leak_mech_room
+#      leak_alarm_fridge        (ThirdReality)
+#      leak_alarm_mech_room     (ThirdReality)
+#      leak_alarm_bathroom      (ThirdReality)
+#      temp_mech_room           (SNZB-02WD — mech room, near LG washer)
+#      temp_kitchen             (SNZB-02WD — kitchen, behind fridge/dishwasher)
+#      probe_bathroom_wall      (SNZB-02LD — probe pressed to supply pipe on
+#                                 bathroom outer wall)
+#    This makes the entity IDs below predictable
+#    (binary_sensor.leak_bosch_washer_water_leak, etc.) — HA will
+#    auto-generate them from the friendly name once exposed.
+# 5. Confirm each shows a recent "Last seen" and non-zero battery % in Z2M
+#    before moving furniture back / running a wash cycle.
+#
+# NOTE ON ENTITY NAMES: adjust the entity_id values below to match what
+# actually shows up in Home Assistant > Settings > Devices & Services >
+# Zigbee2MQTT once you've paired and renamed each device. The ones here
+# assume the friendly names above.
+#
+# NOTE ON NOTIFICATIONS: replace `notify.mobile_app_YOUR_PHONE` with your
+# actual mobile app notify service (Settings > Devices & Services >
+# Mobile App > your device, or check Developer Tools > Actions for the
+# exact `notify.mobile_app_...` name).
+# =============================================================================
+
+automation:
+  # ---------------------------------------------------------------------
+  # 1. Any leak sensor trips -> immediate high-priority push notification
+  #    Uses a wildcard-style trigger list so you only maintain one
+  #    automation as you add more leak sensors later.
+  # ---------------------------------------------------------------------
+  - alias: "Leak Detected - Push Alert"
+    description: "Fires on any SNZB-05P or ThirdReality leak sensor"
+    trigger:
+      - platform: state
+        entity_id:
+          - binary_sensor.leak_bosch_washer_water_leak
+          - binary_sensor.leak_lg_washer_water_leak
+          - binary_sensor.leak_liebherr_fridge_water_leak
+          - binary_sensor.leak_mech_room_water_leak
+          - binary_sensor.leak_alarm_fridge_water_leak
+          - binary_sensor.leak_alarm_mech_room_water_leak
+          - binary_sensor.leak_alarm_bathroom_water_leak
+        to: "on"
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "💧 Water leak detected — cabin"
+          message: >
+            {{ trigger.to_state.attributes.friendly_name }} tripped at
+            {{ now().strftime('%-I:%M %p') }}.
+          data:
+            priority: high
+            ttl: 0
+            channel: alarm_stream
+            tag: "cabin-leak"
+      - service: persistent_notification.create
+        data:
+          title: "Leak Alert"
+          message: >
+            {{ trigger.to_state.attributes.friendly_name }} detected water
+            at {{ now().strftime('%Y-%m-%d %H:%M') }}.
+      # Auto-close the main shutoff valve (Zigbee clamp-on actuator).
+      # Rename in Z2M as "main_water_valve" when you pair it.
+      - service: switch.turn_off
+        target:
+          entity_id: switch.main_water_valve
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "🚫 Main water valve closed — cabin"
+          message: >
+            Valve auto-closed in response to
+            {{ trigger.to_state.attributes.friendly_name }}. It will NOT
+            reopen automatically — confirm the leak source before turning
+            water back on manually.
+          data:
+            priority: high
+            tag: "cabin-valve-closed"
+
+  # ---------------------------------------------------------------------
+  # 2. Freeze warning - low pipe/room temperature
+  #    Adjust threshold per sensor; pipe probe should trigger earlier
+  #    (higher threshold) than a room sensor since pipes freeze first.
+  # ---------------------------------------------------------------------
+  - alias: "Freeze Warning - Mech Room / Kitchen"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.temp_mech_room_temperature
+        below: 38   # °F — adjust to taste; gives buffer before 32°F
+      - platform: numeric_state
+        entity_id: sensor.temp_kitchen_temperature
+        below: 38
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "🥶 Freeze risk — cabin"
+          message: >
+            {{ trigger.to_state.attributes.friendly_name }} reads
+            {{ trigger.to_state.state }}°F.
+          data:
+            priority: high
+            tag: "cabin-freeze"
+
+  - alias: "Freeze Warning - Bathroom Wall Pipe Probe"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.probe_bathroom_wall_temperature
+        below: 36   # tighter threshold — probe reads pipe surface directly
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "🥶 Pipe freeze risk — cabin"
+          message: "Bathroom wall pipe probe reads {{ trigger.to_state.state }}°F."
+          data:
+            priority: high
+            tag: "cabin-freeze-pipe"
+
+  # ---------------------------------------------------------------------
+  # 3. Low battery - weekly-ish nag so you're not caught out mid-winter
+  #    Fires once per sensor when it crosses 20%, not every poll.
+  # ---------------------------------------------------------------------
+  - alias: "Zigbee Sensor Battery Low"
+    trigger:
+      - platform: numeric_state
+        entity_id:
+          - sensor.leak_bosch_washer_battery
+          - sensor.leak_lg_washer_battery
+          - sensor.leak_liebherr_fridge_battery
+          - sensor.leak_mech_room_battery
+          - sensor.leak_alarm_fridge_battery
+          - sensor.leak_alarm_mech_room_battery
+          - sensor.temp_mech_room_battery
+          - sensor.temp_kitchen_battery
+          - sensor.probe_bathroom_wall_battery
+        below: 20
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "🔋 Low battery — cabin sensor"
+          message: >
+            {{ trigger.to_state.attributes.friendly_name }} is at
+            {{ trigger.to_state.state }}%.
+
+  # ---------------------------------------------------------------------
+  # 4. Sensor gone silent - Zigbee mesh / range problem catch-all
+  #    Battery sensors report on change, not on a fixed interval, so use
+  #    "not seen for X hours" rather than a normal availability check.
+  # ---------------------------------------------------------------------
+  - alias: "Cabin Sensor Unavailable Too Long"
+    trigger:
+      - platform: state
+        entity_id:
+          - binary_sensor.leak_bosch_washer_water_leak
+          - binary_sensor.leak_lg_washer_water_leak
+          - binary_sensor.leak_liebherr_fridge_water_leak
+          - binary_sensor.leak_mech_room_water_leak
+        to: "unavailable"
+        for:
+          hours: 6
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "⚠️ Cabin sensor offline"
+          message: >
+            {{ trigger.to_state.attributes.friendly_name | default(trigger.entity_id) }}
+            has been unavailable for 6+ hours — check Zigbee mesh / battery.
+
+  # ---------------------------------------------------------------------
+  # 5. Mesh health - link quality degradation warning
+  #    Z2M exposes "linkquality" as an attribute on most device sensors
+  #    (also visible as its own diagnostic entity in HA: e.g.
+  #    sensor.leak_mech_room_linkquality). LQI below ~20 usually means a
+  #    sensor is barely hanging onto the mesh — this catches it before it
+  #    goes fully unavailable, which the automation above already covers
+  #    as a backstop.
+  # ---------------------------------------------------------------------
+  - alias: "Cabin Sensor Weak Signal"
+    trigger:
+      - platform: numeric_state
+        entity_id:
+          - sensor.leak_mech_room_linkquality
+          - sensor.temp_mech_room_linkquality
+          - sensor.probe_bathroom_wall_linkquality
+        below: 20
+        for:
+          minutes: 30   # avoid alerting on a single noisy reading
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "📶 Weak Zigbee signal — cabin"
+          message: >
+            {{ trigger.to_state.attributes.friendly_name | default(trigger.entity_id) }}
+            has weak link quality ({{ trigger.to_state.state }}). Consider
+            moving one of the THIRDREALITY repeater plugs closer, or adding
+            another router.
+
+  # =============================================================================
+  # Heater + Entry Light (THIRDREALITY smart plug, SONOFF ZBMINIR2 switch)
+  # =============================================================================
+  # Rename in Z2M as you pair:
+  #   heater_mech_room   (THIRDREALITY smart plug)
+  #   light_entry         (ZBMINIR2 switch)
+  # =============================================================================
+
+  # ---------------------------------------------------------------------
+  # 6. Freeze-triggered heater control
+  #    Auto-on when the bathroom wall probe or mech room gets cold, auto-off
+  #    once it recovers with a few degrees of hysteresis so it doesn't cycle.
+  #    NOTE: still keep the freeze push-notifications above even with this
+  #    automated — you want to know if the heater itself fails.
+  # ---------------------------------------------------------------------
+  - alias: "Mech Room Heater - Auto On (Freeze Risk)"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.probe_bathroom_wall_temperature
+        below: 38
+      - platform: numeric_state
+        entity_id: sensor.temp_mech_room_temperature
+        below: 38
+    condition:
+      - condition: state
+        entity_id: switch.heater_mech_room
+        state: "off"
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.heater_mech_room
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "🔥 Heater auto-started — cabin"
+          message: "Mech room heater turned on due to freeze risk."
+
+  - alias: "Mech Room Heater - Auto Off (Recovered)"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.probe_bathroom_wall_temperature
+        above: 42   # hysteresis gap above the 38°F trigger
+      - platform: numeric_state
+        entity_id: sensor.temp_mech_room_temperature
+        above: 42
+    condition:
+      - condition: state
+        entity_id: switch.heater_mech_room
+        state: "on"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.heater_mech_room
+
+  # ---------------------------------------------------------------------
+  # 7. Heater safety catch-all - shouldn't run indefinitely unattended
+  #    Cheap insurance against a stuck relay or a sensor failure leaving
+  #    it on for days. Adjust the max runtime to your comfort level.
+  # ---------------------------------------------------------------------
+  - alias: "Mech Room Heater - Max Runtime Guard"
+    trigger:
+      - platform: state
+        entity_id: switch.heater_mech_room
+        to: "on"
+        for:
+          hours: 48
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "⏱️ Heater running 48h+ — cabin"
+          message: >
+            Mech room heater has been on continuously for 48 hours.
+            Confirm this is expected before it runs longer.
+          data:
+            priority: high
+
+  # ---------------------------------------------------------------------
+  # 8. Entry light - dusk-to-dawn with manual override respected
+  #    Turns on at sunset, off at sunrise. Manual on/off via the physical
+  #    switch or app between those times is left alone (no forced state).
+  # ---------------------------------------------------------------------
+  - alias: "Entry Light - On at Sunset"
+    trigger:
+      - platform: sun
+        event: sunset
+        offset: "-00:15:00"
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.light_entry
+
+  - alias: "Entry Light - Off at Sunrise"
+    trigger:
+      - platform: sun
+        event: sunrise
+        offset: "00:15:00"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.light_entry
+
+  # Optional companion: if you'd rather it be motion-triggered overnight
+  # instead of dusk-to-dawn always-on, swap the two automations above for
+  # a `binary_sensor.<motion>` trigger once you add a Zigbee motion
+  # sensor near the entry — flag if you want that version instead.
+
+  # =============================================================================
+  # Intrusion Deterrence (radio + light on one switch) + RF Tripwire
+  # =============================================================================
+  # SETUP NEEDED FIRST:
+  # 1. Create a helper: Settings > Devices & Services > Helpers > "+ Create
+  #    Helper" > Toggle. Name it "Away Mode" (entity: input_boolean.away_mode).
+  #    Flip it on when you leave the cabin, off when you're there. This is
+  #    what gates the deterrent so it doesn't fire while you're home.
+  # 2. Wire a radio + lamp into one power strip, plug the strip into a spare
+  #    THIRDREALITY plug, rename it "deterrent_radio_light" in Z2M.
+  # 3. Pick two mains-powered routers already in your mesh (e.g. two spare
+  #    THIRDREALITY plugs) positioned across a chokepoint — a hallway or the
+  #    main walkway — and rename them for clarity, e.g. "router_tripwire_a"
+  #    and "router_tripwire_b". Their linkquality entities are what the RF
+  #    tripwire watches below.
+  # =============================================================================
+
+  # ---------------------------------------------------------------------
+  # 9. Deterrent - radio + light + 120dB siren on intrusion signal while away
+  #    Fires on real sensors (motion or door), not the RF tripwire, since
+  #    tripwire readings are noisy. Auto-off after a set duration; any new
+  #    trigger while active restarts the timer.
+  #    Siren uses the SPARE THIRDREALITY leak sensor's buzzer (not one of
+  #    the ones actively monitoring a leak point) — water_leak_buzzer is a
+  #    separate property from water_leak detection, so this doesn't create
+  #    false leak alerts or interfere with real leak monitoring.
+  #    Rename that spare sensor "leak_spare_siren" in Z2M.
+  # ---------------------------------------------------------------------
+  - alias: "Deterrent - Radio, Light, and Siren On (Away Mode Trip)"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.motion_entry_occupancy   # SNZB-03PR2
+        to: "on"
+      - platform: state
+        entity_id:
+          - binary_sensor.door_front_contact               # SNZB-04P #1
+          - binary_sensor.door_second_contact               # SNZB-04P #2
+        to: "on"
+    condition:
+      - condition: state
+        entity_id: input_boolean.away_mode
+        state: "on"
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.deterrent_radio_light
+      # Set continuous alarm mode (0), then sound the siren.
+      - service: mqtt.publish
+        data:
+          topic: "zigbee2mqtt/leak_spare_siren/set"
+          payload: '{"water_leak_buzzer_alarm_mode": 0}'
+      - service: mqtt.publish
+        data:
+          topic: "zigbee2mqtt/leak_spare_siren/set"
+          payload: '{"water_leak_buzzer": "ON"}'
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "🚨 Cabin activity detected while away"
+          message: >
+            {{ trigger.to_state.attributes.friendly_name }} triggered.
+            Radio, light, and siren activated.
+          data:
+            priority: high
+            tag: "cabin-intrusion"
+      - delay:
+          minutes: 20
+      - service: switch.turn_off
+        target:
+          entity_id: switch.deterrent_radio_light
+      - service: mqtt.publish
+        data:
+          topic: "zigbee2mqtt/leak_spare_siren/set"
+          payload: '{"water_leak_buzzer": "OFF"}'
+
+  # ---------------------------------------------------------------------
+  # 10. RF Tripwire - passive link-quality anomaly (advisory only)
+  #     A sustained drop in link quality on BOTH chokepoint routers at once
+  #     is a weak signal someone/something is blocking the RF path between
+  #     them. Treated as advisory — sends a low-priority notification, does
+  #     NOT trigger the deterrent directly, since single-sensor RF dips are
+  #     common and not reliable enough on their own.
+  # ---------------------------------------------------------------------
+  - alias: "RF Tripwire - Possible Presence Anomaly"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.router_tripwire_a_linkquality
+        below: 40
+      - platform: numeric_state
+        entity_id: sensor.router_tripwire_b_linkquality
+        below: 40
+    condition:
+      - condition: state
+        entity_id: input_boolean.away_mode
+        state: "on"
+      # Require BOTH routers showing degraded signal, not just one —
+      # cuts down on false positives from normal RF noise.
+      - condition: numeric_state
+        entity_id: sensor.router_tripwire_a_linkquality
+        below: 40
+      - condition: numeric_state
+        entity_id: sensor.router_tripwire_b_linkquality
+        below: 40
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "📡 Possible RF anomaly — cabin"
+          message: >
+            Both tripwire routers show degraded signal simultaneously —
+            could be presence, could be RF noise. Check camera/other
+            sensors before assuming intrusion.
+          data:
+            priority: normal
+            tag: "cabin-rf-tripwire"
