@@ -60,6 +60,11 @@ devices are paired in Zigbee2MQTT and renamed to match:
 Separately ordered: a Reolink PoE camera for outdoor coverage (not part
 of the Zigbee mesh).
 
+## Setup and hardware pairing
+
+See [PAIRING_GUIDE.md](./PAIRING_GUIDE.md) for the full Zigbee device
+pairing sequence and post-pairing checklist.
+
 ## Order confirmed
 
 First hardware round ordered 2026-07-18 via sonoff.tech (order #sn42122,
