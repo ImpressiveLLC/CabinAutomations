@@ -109,7 +109,15 @@ Build order within this task:
 3. Add Change (config PATCH)
 4. Add Add (permit-join flow — show a countdown timer matching Z2M's
    default ~254s join window, with a live-updating "new device found"
-   list as devices join)
+   list as devices join). **On successful pairing of a device, present
+   three explicit next-action choices — don't auto-advance or assume:**
+   - **"Add another"** — re-opens the permit-join window immediately,
+     stays in the Add flow
+   - **"Configure it now"** — jumps straight into that device's L3
+     config view (the one just paired)
+   - **"Check out all devices"** — returns to the L2 landing / device
+     browser (the See view, showing Active / Ready to roll / Out of
+     Action status for everything, not just what was just paired)
 5. Add Remove (with a confirmation step — this is destructive)
 
 **Escape hatch:** add a low-prominence "Advanced" link that opens the raw
