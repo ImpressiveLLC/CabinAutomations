@@ -8,7 +8,7 @@ deterrence.
 ## Status
 
 **Not yet deployed.** Hardware ordered (SONOFF + THIRDREALITY, first round
-via sonoff.tech and Amazon), arriving after the weekend. Zigbee2MQTT is
+via sonoff.tech and Amazon), will be parallel running a REOLINK cam and whatever TBD options are feasible for a Blink that's not worth a stand-alone subscription for (going to go straight to the service upload layer prior to cloud I think?). Zigbee2MQTT is
 configured on the cabin stack but no devices are paired yet.
 
 ## Contents
