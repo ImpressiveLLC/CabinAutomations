@@ -58,6 +58,7 @@ automation:
           - binary_sensor.leak_liebherr_fridge_water_leak
           - binary_sensor.leak_mech_room_water_leak
           - binary_sensor.leak_alarm_fridge_water_leak
+          - binary_sensor.leak_alarm_dishwasher_water_leak
           - binary_sensor.leak_alarm_mech_room_water_leak
           - binary_sensor.leak_alarm_bathroom_water_leak
         to: "on"
@@ -109,6 +110,9 @@ automation:
       - platform: numeric_state
         entity_id: sensor.temp_kitchen_temperature
         below: 38
+      - platform: numeric_state
+        entity_id: sensor.temp_outside_lowest_temperature
+        below: 38
     action:
       - service: notify.mobile_app_YOUR_PHONE
         data:
@@ -147,6 +151,7 @@ automation:
           - sensor.leak_liebherr_fridge_battery
           - sensor.leak_mech_room_battery
           - sensor.leak_alarm_fridge_battery
+          - sensor.leak_alarm_dishwasher_battery
           - sensor.leak_alarm_mech_room_battery
           - sensor.temp_mech_room_battery
           - sensor.temp_kitchen_battery
@@ -173,6 +178,9 @@ automation:
           - binary_sensor.leak_lg_washer_water_leak
           - binary_sensor.leak_liebherr_fridge_water_leak
           - binary_sensor.leak_mech_room_water_leak
+          - binary_sensor.leak_alarm_fridge_water_leak
+          - binary_sensor.leak_alarm_dishwasher_water_leak
+          - binary_sensor.leak_alarm_bathroom_water_leak
         to: "unavailable"
         for:
           hours: 6
@@ -312,6 +320,64 @@ automation:
       - service: switch.turn_off
         target:
           entity_id: switch.light_entry
+
+# =============================================================================
+  # Breaker Box Fan/Heater (humidity control, mech room adjacent)
+  # =============================================================================
+
+  # ---------------------------------------------------------------------
+  # 8b. Breaker Box Fan/Heater - Auto On (High Humidity)
+  # ---------------------------------------------------------------------
+  - alias: "Breaker Box Fan - Auto On (High Humidity)"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.temp_mech_room_humidity
+        above: 60
+    condition:
+      - condition: state
+        entity_id: switch.smart_switch_breaker_box
+        state: "off"
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.smart_switch_breaker_box
+
+  # ---------------------------------------------------------------------
+  # 8c. Breaker Box Fan/Heater - Auto Off (Humidity Recovered)
+  # ---------------------------------------------------------------------
+  - alias: "Breaker Box Fan - Auto Off (Recovered)"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.temp_mech_room_humidity
+        below: 50
+    condition:
+      - condition: state
+        entity_id: switch.smart_switch_breaker_box
+        state: "on"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.smart_switch_breaker_box
+
+  # ---------------------------------------------------------------------
+  # 8d. Breaker Box Fan/Heater - Max Runtime Guard
+  # ---------------------------------------------------------------------
+  - alias: "Breaker Box Fan - Max Runtime Guard"
+    trigger:
+      - platform: state
+        entity_id: switch.smart_switch_breaker_box
+        to: "on"
+        for:
+          hours: 48
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "⏱️ Breaker box fan/heater running 48h+ — cabin"
+          message: >
+            switch.smart_switch_breaker_box has been on continuously for
+            48 hours. Confirm this is expected before it runs longer.
+          data:
+            priority: high
 
   # Optional companion: if you'd rather it be motion-triggered overnight
   # instead of dusk-to-dawn always-on, swap the two automations above for
