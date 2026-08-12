@@ -1,6 +1,6 @@
 # =============================================================================
 # Leak + Freeze Detection Automations
-# For: SONOFF SNZB-05P (leak), THIRDREALITY water leak (leak), 
+# For: SONOFF SNZB-05P (leak), THIRDREALITY water leak (leak),
 #      SONOFF SNZB-02WD / SNZB-02LD (temperature)
 # Paired via Zigbee2MQTT on the M920q cabin stack
 # =============================================================================
@@ -36,10 +36,26 @@
 # Zigbee2MQTT once you've paired and renamed each device. The ones here
 # assume the friendly names above.
 #
-# NOTE ON NOTIFICATIONS: replace `notify.mobile_app_YOUR_PHONE` with your
-# actual mobile app notify service (Settings > Devices & Services >
-# Mobile App > your device, or check Developer Tools > Actions for the
-# exact `notify.mobile_app_...` name).
+# NOTE ON NOTIFICATIONS, rewritten 2026-08-12 (was: `notify.mobile_app_
+# YOUR_PHONE`, a literal placeholder that was never replaced — checked
+# live against this HA instance and the `mobile_app` integration was
+# never even configured, so no real notify.mobile_app_* service existed
+# to swap in): every notification action below now publishes to MQTT
+# topic `cabin/event/{severity}` instead. This is FaceoftheCabin's own
+# existing "direct event injection" contract (MqttBridgeService.
+# handleDirectEvent(), see cabin-orchestration-platform/backend's
+# device-topic-contract.md) — the same pipeline AutomationRuleService's
+# own rules publish through. One place configures where the actual push
+# goes (CABIN_ALERT_NTFY_TOPIC in FaceoftheCabin's infra/.env, already
+# wired to NtfyAlertPublisher), and severity alone decides whether it
+# pushes (CRITICAL) or just persists to event history (WARN/INFO) — no
+# dependency on installing/configuring the HA Companion App at all.
+# Severity below was assigned by translating each automation's existing
+# `data: {priority: high}` (a real signal the original author wanted an
+# actual push) to CRITICAL, and unmarked/`priority: normal` actions to
+# WARN or INFO — not re-decided from scratch. persistent_notification.
+# create calls are left in place as-is: a real, working HA-native
+# fallback independent of any of this.
 # =============================================================================
 
 automation:
@@ -63,17 +79,15 @@ automation:
           - binary_sensor.leak_alarm_bathroom_water_leak
         to: "on"
     action:
-      - service: notify.mobile_app_YOUR_PHONE
+      - service: mqtt.publish
         data:
-          title: "💧 Water leak detected — cabin"
-          message: >
-            {{ trigger.to_state.attributes.friendly_name }} tripped at
-            {{ now().strftime('%-I:%M %p') }}.
-          data:
-            priority: high
-            ttl: 0
-            channel: alarm_stream
-            tag: "cabin-leak"
+          topic: "cabin/event/CRITICAL"
+          payload: >-
+            {{ {
+              "deviceId": trigger.entity_id,
+              "event": "LEAK_DETECTED",
+              "detail": trigger.to_state.attributes.friendly_name ~ " tripped at " ~ now().strftime('%-I:%M %p')
+            } | tojson }}
       - service: persistent_notification.create
         data:
           title: "Leak Alert"
@@ -85,17 +99,15 @@ automation:
       - service: switch.turn_off
         target:
           entity_id: switch.main_water_valve
-      - service: notify.mobile_app_YOUR_PHONE
+      - service: mqtt.publish
         data:
-          title: "🚫 Main water valve closed — cabin"
-          message: >
-            Valve auto-closed in response to
-            {{ trigger.to_state.attributes.friendly_name }}. It will NOT
-            reopen automatically — confirm the leak source before turning
-            water back on manually.
-          data:
-            priority: high
-            tag: "cabin-valve-closed"
+          topic: "cabin/event/CRITICAL"
+          payload: >-
+            {{ {
+              "deviceId": "switch.main_water_valve",
+              "event": "WATER_VALVE_AUTO_CLOSED",
+              "detail": "Valve auto-closed in response to " ~ trigger.to_state.attributes.friendly_name ~ ". It will NOT reopen automatically -- confirm the leak source before turning water back on manually."
+            } | tojson }}
 
   # ---------------------------------------------------------------------
   # 2. Freeze warning - low pipe/room temperature
@@ -114,15 +126,15 @@ automation:
         entity_id: sensor.temp_outside_lowest_temperature
         below: 38
     action:
-      - service: notify.mobile_app_YOUR_PHONE
+      - service: mqtt.publish
         data:
-          title: "🥶 Freeze risk — cabin"
-          message: >
-            {{ trigger.to_state.attributes.friendly_name }} reads
-            {{ trigger.to_state.state }}°F.
-          data:
-            priority: high
-            tag: "cabin-freeze"
+          topic: "cabin/event/CRITICAL"
+          payload: >-
+            {{ {
+              "deviceId": trigger.entity_id,
+              "event": "FREEZE_RISK",
+              "detail": trigger.to_state.attributes.friendly_name ~ " reads " ~ trigger.to_state.state ~ "°F."
+            } | tojson }}
 
   - alias: "Freeze Warning - Bathroom Wall Pipe Probe"
     trigger:
@@ -130,13 +142,15 @@ automation:
         entity_id: sensor.probe_bathroom_wall_temperature
         below: 36   # tighter threshold — probe reads pipe surface directly
     action:
-      - service: notify.mobile_app_YOUR_PHONE
+      - service: mqtt.publish
         data:
-          title: "🥶 Pipe freeze risk — cabin"
-          message: "Bathroom wall pipe probe reads {{ trigger.to_state.state }}°F."
-          data:
-            priority: high
-            tag: "cabin-freeze-pipe"
+          topic: "cabin/event/CRITICAL"
+          payload: >-
+            {{ {
+              "deviceId": "sensor.probe_bathroom_wall_temperature",
+              "event": "FREEZE_RISK_PIPE",
+              "detail": "Bathroom wall pipe probe reads " ~ trigger.to_state.state ~ "°F."
+            } | tojson }}
 
   # ---------------------------------------------------------------------
   # 3. Low battery - weekly-ish nag so you're not caught out mid-winter
@@ -158,12 +172,15 @@ automation:
           - sensor.probe_bathroom_wall_battery
         below: 20
     action:
-      - service: notify.mobile_app_YOUR_PHONE
+      - service: mqtt.publish
         data:
-          title: "🔋 Low battery — cabin sensor"
-          message: >
-            {{ trigger.to_state.attributes.friendly_name }} is at
-            {{ trigger.to_state.state }}%.
+          topic: "cabin/event/WARN"
+          payload: >-
+            {{ {
+              "deviceId": trigger.entity_id,
+              "event": "BATTERY_LOW",
+              "detail": trigger.to_state.attributes.friendly_name ~ " is at " ~ trigger.to_state.state ~ "%."
+            } | tojson }}
 
   # ---------------------------------------------------------------------
   # 4. Sensor gone silent - Zigbee mesh / range problem catch-all
@@ -185,12 +202,15 @@ automation:
         for:
           hours: 6
     action:
-      - service: notify.mobile_app_YOUR_PHONE
+      - service: mqtt.publish
         data:
-          title: "⚠️ Cabin sensor offline"
-          message: >
-            {{ trigger.to_state.attributes.friendly_name | default(trigger.entity_id) }}
-            has been unavailable for 6+ hours — check Zigbee mesh / battery.
+          topic: "cabin/event/WARN"
+          payload: >-
+            {{ {
+              "deviceId": trigger.entity_id,
+              "event": "SENSOR_UNAVAILABLE",
+              "detail": (trigger.to_state.attributes.friendly_name | default(trigger.entity_id)) ~ " has been unavailable for 6+ hours -- check Zigbee mesh / battery."
+            } | tojson }}
 
   # ---------------------------------------------------------------------
   # 5. Mesh health - link quality degradation warning
@@ -212,14 +232,15 @@ automation:
         for:
           minutes: 30   # avoid alerting on a single noisy reading
     action:
-      - service: notify.mobile_app_YOUR_PHONE
+      - service: mqtt.publish
         data:
-          title: "📶 Weak Zigbee signal — cabin"
-          message: >
-            {{ trigger.to_state.attributes.friendly_name | default(trigger.entity_id) }}
-            has weak link quality ({{ trigger.to_state.state }}). Consider
-            moving one of the THIRDREALITY repeater plugs closer, or adding
-            another router.
+          topic: "cabin/event/WARN"
+          payload: >-
+            {{ {
+              "deviceId": trigger.entity_id,
+              "event": "WEAK_SIGNAL",
+              "detail": (trigger.to_state.attributes.friendly_name | default(trigger.entity_id)) ~ " has weak link quality (" ~ trigger.to_state.state ~ "). Consider moving one of the THIRDREALITY repeater plugs closer, or adding another router."
+            } | tojson }}
 
   # =============================================================================
   # Heater + Entry Light (THIRDREALITY smart plug, SONOFF ZBMINIR2 switch)
@@ -252,10 +273,15 @@ automation:
       - service: switch.turn_on
         target:
           entity_id: switch.heater_mech_room
-      - service: notify.mobile_app_YOUR_PHONE
+      - service: mqtt.publish
         data:
-          title: "🔥 Heater auto-started — cabin"
-          message: "Mech room heater turned on due to freeze risk."
+          topic: "cabin/event/INFO"
+          payload: >-
+            {{ {
+              "deviceId": "switch.heater_mech_room",
+              "event": "HEATER_AUTO_STARTED",
+              "detail": "Mech room heater turned on due to freeze risk."
+            } | tojson }}
 
   - alias: "Mech Room Heater - Auto Off (Recovered)"
     trigger:
@@ -287,14 +313,15 @@ automation:
         for:
           hours: 48
     action:
-      - service: notify.mobile_app_YOUR_PHONE
+      - service: mqtt.publish
         data:
-          title: "⏱️ Heater running 48h+ — cabin"
-          message: >
-            Mech room heater has been on continuously for 48 hours.
-            Confirm this is expected before it runs longer.
-          data:
-            priority: high
+          topic: "cabin/event/CRITICAL"
+          payload: >-
+            {{ {
+              "deviceId": "switch.heater_mech_room",
+              "event": "HEATER_MAX_RUNTIME",
+              "detail": "Mech room heater has been on continuously for 48 hours. Confirm this is expected before it runs longer."
+            } | tojson }}
 
   # ---------------------------------------------------------------------
   # 8. Entry light - dusk-to-dawn with manual override respected
@@ -370,14 +397,15 @@ automation:
         for:
           hours: 48
     action:
-      - service: notify.mobile_app_YOUR_PHONE
+      - service: mqtt.publish
         data:
-          title: "⏱️ Breaker box fan/heater running 48h+ — cabin"
-          message: >
-            switch.smart_switch_breaker_box has been on continuously for
-            48 hours. Confirm this is expected before it runs longer.
-          data:
-            priority: high
+          topic: "cabin/event/CRITICAL"
+          payload: >-
+            {{ {
+              "deviceId": "switch.smart_switch_breaker_box",
+              "event": "BREAKER_BOX_FAN_MAX_RUNTIME",
+              "detail": "switch.smart_switch_breaker_box has been on continuously for 48 hours. Confirm this is expected before it runs longer."
+            } | tojson }}
 
   # Optional companion: if you'd rather it be motion-triggered overnight
   # instead of dusk-to-dawn always-on, swap the two automations above for
@@ -439,15 +467,15 @@ automation:
         data:
           topic: "zigbee2mqtt/leak_spare_siren/set"
           payload: '{"water_leak_buzzer": "ON"}'
-      - service: notify.mobile_app_YOUR_PHONE
+      - service: mqtt.publish
         data:
-          title: "🚨 Cabin activity detected while away"
-          message: >
-            {{ trigger.to_state.attributes.friendly_name }} triggered.
-            Radio, light, and siren activated.
-          data:
-            priority: high
-            tag: "cabin-intrusion"
+          topic: "cabin/event/CRITICAL"
+          payload: >-
+            {{ {
+              "deviceId": trigger.entity_id,
+              "event": "INTRUSION_DETERRENT_TRIGGERED",
+              "detail": trigger.to_state.attributes.friendly_name ~ " triggered. Radio, light, and siren activated."
+            } | tojson }}
       - delay:
           minutes: 20
       - service: switch.turn_off
@@ -487,13 +515,12 @@ automation:
         entity_id: sensor.router_tripwire_b_linkquality
         below: 40
     action:
-      - service: notify.mobile_app_YOUR_PHONE
+      - service: mqtt.publish
         data:
-          title: "📡 Possible RF anomaly — cabin"
-          message: >
-            Both tripwire routers show degraded signal simultaneously —
-            could be presence, could be RF noise. Check camera/other
-            sensors before assuming intrusion.
-          data:
-            priority: normal
-            tag: "cabin-rf-tripwire"
+          topic: "cabin/event/WARN"
+          payload: >-
+            {{ {
+              "deviceId": "cabin_rf_tripwire",
+              "event": "RF_TRIPWIRE_ANOMALY",
+              "detail": "Both tripwire routers show degraded signal simultaneously -- could be presence, could be RF noise. Check camera/other sensors before assuming intrusion."
+            } | tojson }}
