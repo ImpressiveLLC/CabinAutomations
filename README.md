@@ -7,9 +7,11 @@ deterrence.
 
 ## Status
 
-**Not yet deployed.** Hardware ordered (SONOFF + THIRDREALITY, first round
-via sonoff.tech and Amazon), will be parallel running a REOLINK cam and whatever TBD options are feasible for a Blink that's not worth a stand-alone subscription for (going to go straight to the service upload layer prior to cloud I think?). Zigbee2MQTT is
-configured on the cabin stack but no devices are paired yet.
+**Automation file not yet deployed.** The cabin Zigbee2MQTT mesh is live and
+the current leak sensors plus `main_water_valve` are paired. The automation
+must still pass a Home Assistant configuration check, be reloaded with the
+operator present, and complete the supervised wet-sensor/physical-valve test
+below before it is treated as active protection.
 
 ## Contents
 
@@ -30,8 +32,9 @@ configured on the cabin stack but no devices are paired yet.
 This file still has **placeholder entity IDs** that only become real once
 devices are paired in Zigbee2MQTT and renamed to match:
 
-- `notify.mobile_app_YOUR_PHONE` — replace with your actual mobile app
-  notify service (Developer Tools > Actions, search "notify").
+- `CABIN_ALERT_NTFY_TOPIC` in FaceoftheCabin's M920q environment must be set.
+  Automations publish `cabin/event/{severity}` and FaceoftheCabin owns the
+  notification destination; no Home Assistant mobile-app service is assumed.
 - Friendly names (`leak_bosch_washer`, `temp_mech_room`,
   `probe_bathroom_wall`, `heater_mech_room`, `light_entry`,
   `deterrent_radio_light`, `router_tripwire_a/b`, `leak_spare_siren`,
@@ -39,6 +42,12 @@ devices are paired in Zigbee2MQTT and renamed to match:
   — assign these as friendly names in Zigbee2MQTT when pairing each
   device, per the pairing order and setup notes at the top of the YAML
   file itself.
+- The first leak automation deliberately has two parallel paths: it publishes
+  the leak alert immediately while independently commanding
+  `switch.main_water_valve` off. It waits up to 30 seconds for Home Assistant
+  to report the valve off, logs a confirmed close as INFO, and raises a second
+  CRITICAL event when closure cannot be confirmed. It never reopens the valve
+  automatically.
 - `input_boolean.away_mode` — create as a Toggle helper in Home Assistant
   (Settings > Devices & Services > Helpers) before the deterrent/tripwire
   automations will work.

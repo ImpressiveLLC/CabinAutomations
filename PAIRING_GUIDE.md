@@ -70,10 +70,10 @@ For each device:
    `automations/leak_freeze_automations.yaml`. Friendly names above
    should produce predictable IDs (e.g. `binary_sensor.leak_bosch_washer_water_leak`),
    but always verify rather than assume.
-2. **Set the notification target.** Find your actual mobile app notify
-   service under **Developer Tools > Actions** (search "notify") and
-   replace every `notify.mobile_app_YOUR_PHONE` placeholder in the
-   automations file with it.
+2. **Verify the notification path.** Confirm FaceoftheCabin's M920q
+   environment has `CABIN_ALERT_NTFY_TOPIC` configured. These automations
+   publish to `cabin/event/{severity}`; FaceoftheCabin persists every event
+   and sends CRITICAL events to the configured ntfy destination.
 3. **Create required helpers** (Settings > Devices & Services > Helpers):
    - `input_boolean.away_mode` — Toggle
    - `input_boolean.pause_automations` — Toggle
@@ -82,12 +82,18 @@ For each device:
 4. **Deploy the automations file** — merge into `automations.yaml` or
    reference via `!include`, then reload automations
    (Developer Tools > YAML > Reload Automations, or restart HA).
-5. **Test the full chain on one leak sensor** before considering this
-   done — wet a paper towel, touch it to a probe/sensor, confirm:
-   detection → push notification → main valve closes → siren behavior
-   (if applicable) all fire correctly. Don't assume the automation logic
-   is correct just because the YAML loaded without errors.
-6. **Leave the main valve OPEN** before walking away from the test.
+5. **Test the full chain on one leak sensor with a person at the valve**
+   before considering this done — wet a paper towel, touch it to a
+   probe/sensor, and confirm both parallel paths independently:
+   detection is logged → CRITICAL push arrives; and the valve command is
+   sent → the physical valve closes → Home Assistant reports it off → a
+   `WATER_VALVE_AUTO_CLOSED` INFO event is logged. Also perform one
+   controlled failure test and confirm `WATER_VALVE_CLOSE_UNCONFIRMED`
+   raises a CRITICAL event after 30 seconds. Don't assume the automation
+   logic is correct just because the YAML loaded without errors.
+6. **Clear every leak sensor, inspect the leak source, then reopen the main
+   valve manually.** The automation intentionally never reopens it. Leave
+   the main valve OPEN before walking away from the supervised test.
 
 ## Common pairing issues
 
