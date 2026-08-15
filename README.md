@@ -1,31 +1,44 @@
 # Cabin Zigbee Automations
 
 Home Assistant automations for the cabin's Zigbee2MQTT sensor deployment
-(M920q stack). Covers leak detection, freeze/temperature monitoring, the
-main water shutoff valve, heater control, entry lighting, and intrusion
-deterrence.
+(M920q stack). Covers freeze/temperature monitoring, heater control, entry
+lighting, and intrusion deterrence. Leak detection and the main water
+shutoff valve are deliberately **not** covered here — see Status below.
 
 ## Status
 
 **Automation file not yet deployed.** The cabin Zigbee2MQTT mesh is live and
 the current leak sensors plus `main_water_valve` are paired. The automation
-must still pass a Home Assistant configuration check, be reloaded with the
-operator present, and complete the supervised wet-sensor/physical-valve test
-below before it is treated as active protection.
+must still pass a Home Assistant configuration check and be reloaded with the
+operator present before it is treated as active.
+
+**Leak detection and `main_water_valve` are owned by FaceoftheCabin's
+`WorkflowRuleService`, not by this repo.** This file used to contain a leak
+automation (notify + `switch.turn_off` on `main_water_valve`, confirm/
+unconfirmed check); it was removed 2026-08-15 once `WorkflowRuleService`
+took over that exact trigger/action with its own idempotency, edge-detection,
+command-confirmation, and no-automatic-reopen guard, already proven live
+against the real valve. Two independent systems each able to close the same
+safety-critical actuator was a real duplicate-controller risk, not a
+hypothetical one — see `docs/ontology.yaml`'s `trigger_water_leak_detected`
+in the `FaceoftheCabin` repo. Test the leak → notify → valve-off chain from
+that side; this repo's leak-sensor pairing only needs to get each sensor
+reporting cleanly over Zigbee2MQTT/MQTT (see PAIRING_GUIDE.md), nothing HA-
+side needs to react to it.
 
 ## Contents
 
-- `automations/leak_freeze_automations.yaml` — full automation set:
-  1. Leak detection push alert (all SNZB-05P / THIRDREALITY leak sensors)
-  2. Freeze warning (mech room, kitchen, bathroom wall probe)
-  3. Low battery notification
-  4. Sensor-unavailable catch-all (6+ hours silent)
-  5. Mesh health / weak link-quality warning
-  6. Freeze-triggered heater auto-on/off (with hysteresis)
-  7. Heater max-runtime safety guard (48h)
-  8. Entry light dusk-to-dawn control
-  9. Intrusion deterrence: radio + light + siren, gated by away-mode
-  10. RF tripwire: passive link-quality anomaly detection (advisory only)
+- `automations/leak_freeze_automations.yaml` — automation set (leak
+  detection/valve shutoff intentionally excluded, see Status above):
+  1. Freeze warning (mech room, kitchen, bathroom wall probe)
+  2. Low battery notification
+  3. Sensor-unavailable catch-all (6+ hours silent)
+  4. Mesh health / weak link-quality warning
+  5. Freeze-triggered heater auto-on/off (with hysteresis)
+  6. Heater max-runtime safety guard (48h)
+  7. Entry light dusk-to-dawn control
+  8. Intrusion deterrence: radio + light + siren, gated by away-mode
+  9. RF tripwire: passive link-quality anomaly detection (advisory only)
 
 ## Before deploying
 
@@ -42,12 +55,6 @@ devices are paired in Zigbee2MQTT and renamed to match:
   — assign these as friendly names in Zigbee2MQTT when pairing each
   device, per the pairing order and setup notes at the top of the YAML
   file itself.
-- The first leak automation deliberately has two parallel paths: it publishes
-  the leak alert immediately while independently commanding
-  `switch.main_water_valve` off. It waits up to 30 seconds for Home Assistant
-  to report the valve off, logs a confirmed close as INFO, and raises a second
-  CRITICAL event when closure cannot be confirmed. It never reopens the valve
-  automatically.
 - `input_boolean.away_mode` — create as a Toggle helper in Home Assistant
   (Settings > Devices & Services > Helpers) before the deterrent/tripwire
   automations will work.

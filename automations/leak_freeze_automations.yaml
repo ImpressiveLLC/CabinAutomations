@@ -60,83 +60,31 @@
 
 automation:
   # ---------------------------------------------------------------------
-  # 1. Any leak sensor trips -> immediate high-priority push notification
-  #    Uses a wildcard-style trigger list so you only maintain one
-  #    automation as you add more leak sensors later.
-  # ---------------------------------------------------------------------
-  - alias: "Leak Detected - Push Alert"
-    description: "Fires on any SNZB-05P or ThirdReality leak sensor"
-    trigger:
-      - platform: state
-        entity_id:
-          - binary_sensor.leak_bosch_washer_water_leak
-          - binary_sensor.leak_lg_washer_water_leak
-          - binary_sensor.leak_liebherr_fridge_water_leak
-          - binary_sensor.leak_mech_room_water_leak
-          - binary_sensor.leak_alarm_fridge_water_leak
-          - binary_sensor.leak_alarm_dishwasher_water_leak
-          - binary_sensor.leak_alarm_mech_room_water_leak
-          - binary_sensor.leak_alarm_bathroom_water_leak
-        to: "on"
-    action:
-      # Notify and close the valve concurrently. A slow or unavailable valve
-      # must never delay the initial leak alert.
-      - parallel:
-          - sequence:
-              - service: mqtt.publish
-                data:
-                  topic: "cabin/event/CRITICAL"
-                  payload: >-
-                    {{ {
-                      "deviceId": trigger.entity_id,
-                      "event": "LEAK_DETECTED",
-                      "detail": (trigger.to_state.attributes.friendly_name | default(trigger.entity_id, true)) ~ " tripped at " ~ now().strftime('%-I:%M %p')
-                    } | tojson }}
-              - service: persistent_notification.create
-                data:
-                  title: "Leak Alert"
-                  message: >
-                    {{ trigger.to_state.attributes.friendly_name | default(trigger.entity_id, true) }}
-                    detected water at {{ now().strftime('%Y-%m-%d %H:%M') }}.
-
-          # Auto-close the main shutoff valve (Zigbee clamp-on actuator).
-          # Rename in Z2M as "main_water_valve" when you pair it. The valve
-          # never reopens automatically; a person must inspect the leak and
-          # explicitly reopen it after every leak sensor is clear.
-          - sequence:
-              - service: switch.turn_off
-                target:
-                  entity_id: switch.main_water_valve
-              - wait_template: "{{ is_state('switch.main_water_valve', 'off') }}"
-                timeout: "00:00:30"
-                continue_on_timeout: true
-              - choose:
-                  - conditions:
-                      - condition: template
-                        value_template: "{{ wait.completed }}"
-                    sequence:
-                      - service: mqtt.publish
-                        data:
-                          topic: "cabin/event/INFO"
-                          payload: >-
-                            {{ {
-                              "deviceId": "switch.main_water_valve",
-                              "event": "WATER_VALVE_AUTO_CLOSED",
-                              "detail": "Valve closure was confirmed after " ~ (trigger.to_state.attributes.friendly_name | default(trigger.entity_id, true)) ~ " detected water. It will NOT reopen automatically."
-                            } | tojson }}
-                default:
-                  - service: mqtt.publish
-                    data:
-                      topic: "cabin/event/CRITICAL"
-                      payload: >-
-                        {{ {
-                          "deviceId": "switch.main_water_valve",
-                          "event": "WATER_VALVE_CLOSE_UNCONFIRMED",
-                          "detail": "Valve closure was not confirmed within 30 seconds after " ~ (trigger.to_state.attributes.friendly_name | default(trigger.entity_id, true)) ~ " detected water. Inspect Home Assistant and Zigbee2MQTT and close the valve manually."
-                        } | tojson }}
-    mode: parallel
-    max: 10
-
+  # 1. Leak detection + main valve shutoff -- REMOVED 2026-08-15, owned by
+  #    FaceoftheCabin's WorkflowRuleService, not this file.
+  #
+  #    This automation (leak sensor -> push alert + switch.turn_off on
+  #    switch.main_water_valve, with a 30s confirm/unconfirmed check) used
+  #    to live here. docs/ontology.yaml's trigger_water_leak_detected ->
+  #    action_main_water_valve_off is now wired to WorkflowRuleService in
+  #    the cabin-orchestration-platform backend, which has its own
+  #    idempotency, edge-detection, command-confirmation, and
+  #    no-automatic-reopen guard already built and proven live against the
+  #    real valve. Keeping an independent HA decision path for the exact
+  #    same trigger/actuator would mean two uncoordinated systems both able
+  #    to close the same safety-critical valve -- duplicate CRITICAL
+  #    alerts at minimum, unclear incident ownership at worst. Resolved
+  #    2026-08-15 per this project's ontology-first decision framework (see
+  #    Documents/Codex/2026-08-11-codex-background-work-notes.md); not
+  #    modeled here as a passive/fallback publisher either, since a silent
+  #    second listener on the same trigger is the same risk with extra
+  #    steps.
+  #
+  #    If HA-side awareness of leak state is ever wanted again (e.g. for a
+  #    dashboard card), model it as a genuinely passive display-only
+  #    automation with no action branch, and say so explicitly -- don't
+  #    let it grow back into a second decision-maker by accretion.
+  #
   # ---------------------------------------------------------------------
   # 2. Freeze warning - low pipe/room temperature
   #    Adjust threshold per sensor; pipe probe should trigger earlier

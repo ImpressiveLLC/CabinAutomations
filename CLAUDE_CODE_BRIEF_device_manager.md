@@ -18,12 +18,23 @@ Separately, the cabin location now has a real, deployed Home Assistant +
 Zigbee2MQTT stack (M920q, Docker Compose) with paired sensors (leak
 detection, freeze monitoring, door/motion sensors, a Zigbee-controlled main
 water valve actuator, a mechanical room heater plug, and an intrusion
-deterrence setup). The full automation logic already lives in Home
-Assistant's `automations.yaml` (leak alerts, freeze-triggered heater
-control, valve auto-shutoff, intrusion deterrence, RF tripwire) — **do not
-duplicate this logic in the platform.** The platform's job is to give a
-clean, resilient GUI on top of what Home Assistant/Zigbee2MQTT are already
-doing, not reimplement the automation engine.
+deterrence setup). Most of this automation logic lives in Home Assistant's
+`automations.yaml` (freeze-triggered heater control, intrusion deterrence,
+RF tripwire) — **do not duplicate this logic in the platform.** The
+platform's job is to give a clean, resilient GUI on top of what Home
+Assistant/Zigbee2MQTT are already doing, not reimplement the automation
+engine.
+
+> **2026-08-15 correction — this brief predates the current architecture.**
+> Leak detection and the main water valve's shutoff decision are the one
+> deliberate exception to "HA already owns it, don't duplicate": that logic
+> now lives entirely in `WorkflowRuleService` on the platform backend
+> (`cabin-orchestration-platform`, the project this brief calls
+> `smrekar-platform`), driven by `docs/ontology.yaml`, not in this repo's
+> `automations.yaml` — see `README.md`'s Status section and
+> `automations/leak_freeze_automations.yaml`'s own header comment for why.
+> If you're picking this brief up fresh, treat "the platform is GUI-only,
+> HA owns all automation" as no longer true for that one case.
 
 ## Goal
 
