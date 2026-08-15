@@ -70,10 +70,12 @@ For each device:
    `automations/leak_freeze_automations.yaml`. Friendly names above
    should produce predictable IDs (e.g. `binary_sensor.leak_bosch_washer_water_leak`),
    but always verify rather than assume.
-2. **Set the notification target.** Find your actual mobile app notify
-   service under **Developer Tools > Actions** (search "notify") and
-   replace every `notify.mobile_app_YOUR_PHONE` placeholder in the
-   automations file with it.
+2. **Verify the notification path.** Confirm FaceoftheCabin's M920q
+   environment has `CABIN_ALERT_NTFY_TOPIC` configured. The automations in
+   this file (freeze, battery, weak-signal, runtime, heater, RF-tripwire,
+   intrusion — not leak, see below) publish to `cabin/event/{severity}`;
+   FaceoftheCabin persists every event and sends CRITICAL events to the
+   configured ntfy destination.
 3. **Create required helpers** (Settings > Devices & Services > Helpers):
    - `input_boolean.away_mode` — Toggle
    - `input_boolean.pause_automations` — Toggle
@@ -82,12 +84,23 @@ For each device:
 4. **Deploy the automations file** — merge into `automations.yaml` or
    reference via `!include`, then reload automations
    (Developer Tools > YAML > Reload Automations, or restart HA).
-5. **Test the full chain on one leak sensor** before considering this
-   done — wet a paper towel, touch it to a probe/sensor, confirm:
-   detection → push notification → main valve closes → siren behavior
-   (if applicable) all fire correctly. Don't assume the automation logic
-   is correct just because the YAML loaded without errors.
-6. **Leave the main valve OPEN** before walking away from the test.
+5. **Leak detection and the main valve are not tested from this file.**
+   `automations/leak_freeze_automations.yaml` no longer contains a leak
+   automation — that decision (leak sensor → notify + close
+   `main_water_valve`, with a confirm/unconfirmed check) now belongs
+   entirely to FaceoftheCabin's `WorkflowRuleService`, already proven live
+   against the real valve. What this pairing guide's leak sensors still
+   need: confirm each one shows a recent **Last seen** in Z2M with a
+   working `binary_sensor...water_leak` state (step 5 of the pairing
+   sequence above) so Zigbee2MQTT/MQTT — which `WorkflowRuleService`
+   consumes directly — can see it; nothing HA-side needs to react to it.
+   Test the actual leak → notify → valve-off chain from the
+   FaceoftheCabin/cabin-orchestration-platform side, not here.
+6. **After any real or test leak, reopen the main valve manually once the
+   source is inspected and clear.** `WorkflowRuleService` intentionally
+   never reopens it automatically — same "no auto-reopen" property the
+   automation removed from this file used to have. Leave the main valve
+   OPEN before walking away from any supervised test.
 
 ## Common pairing issues
 

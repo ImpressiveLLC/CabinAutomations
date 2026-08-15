@@ -1,37 +1,53 @@
 # Cabin Zigbee Automations
 
 Home Assistant automations for the cabin's Zigbee2MQTT sensor deployment
-(M920q stack). Covers leak detection, freeze/temperature monitoring, the
-main water shutoff valve, heater control, entry lighting, and intrusion
-deterrence.
+(M920q stack). Covers freeze/temperature monitoring, heater control, entry
+lighting, and intrusion deterrence. Leak detection and the main water
+shutoff valve are deliberately **not** covered here — see Status below.
 
 ## Status
 
-**Not yet deployed.** Hardware ordered (SONOFF + THIRDREALITY, first round
-via sonoff.tech and Amazon), will be parallel running a REOLINK cam and whatever TBD options are feasible for a Blink that's not worth a stand-alone subscription for (going to go straight to the service upload layer prior to cloud I think?). Zigbee2MQTT is
-configured on the cabin stack but no devices are paired yet.
+**Automation file not yet deployed.** The cabin Zigbee2MQTT mesh is live and
+the current leak sensors plus `main_water_valve` are paired. The automation
+must still pass a Home Assistant configuration check and be reloaded with the
+operator present before it is treated as active.
+
+**Leak detection and `main_water_valve` are owned by FaceoftheCabin's
+`WorkflowRuleService`, not by this repo.** This file used to contain a leak
+automation (notify + `switch.turn_off` on `main_water_valve`, confirm/
+unconfirmed check); it was removed 2026-08-15 once `WorkflowRuleService`
+took over that exact trigger/action with its own idempotency, edge-detection,
+command-confirmation, and no-automatic-reopen guard, already proven live
+against the real valve. Two independent systems each able to close the same
+safety-critical actuator was a real duplicate-controller risk, not a
+hypothetical one — see `docs/ontology.yaml`'s `trigger_water_leak_detected`
+in the `FaceoftheCabin` repo. Test the leak → notify → valve-off chain from
+that side; this repo's leak-sensor pairing only needs to get each sensor
+reporting cleanly over Zigbee2MQTT/MQTT (see PAIRING_GUIDE.md), nothing HA-
+side needs to react to it.
 
 ## Contents
 
-- `automations/leak_freeze_automations.yaml` — full automation set:
-  1. Leak detection push alert (all SNZB-05P / THIRDREALITY leak sensors)
-  2. Freeze warning (mech room, kitchen, bathroom wall probe)
-  3. Low battery notification
-  4. Sensor-unavailable catch-all (6+ hours silent)
-  5. Mesh health / weak link-quality warning
-  6. Freeze-triggered heater auto-on/off (with hysteresis)
-  7. Heater max-runtime safety guard (48h)
-  8. Entry light dusk-to-dawn control
-  9. Intrusion deterrence: radio + light + siren, gated by away-mode
-  10. RF tripwire: passive link-quality anomaly detection (advisory only)
+- `automations/leak_freeze_automations.yaml` — automation set (leak
+  detection/valve shutoff intentionally excluded, see Status above):
+  1. Freeze warning (mech room, kitchen, bathroom wall probe)
+  2. Low battery notification
+  3. Sensor-unavailable catch-all (6+ hours silent)
+  4. Mesh health / weak link-quality warning
+  5. Freeze-triggered heater auto-on/off (with hysteresis)
+  6. Heater max-runtime safety guard (48h)
+  7. Entry light dusk-to-dawn control
+  8. Intrusion deterrence: radio + light + siren, gated by away-mode
+  9. RF tripwire: passive link-quality anomaly detection (advisory only)
 
 ## Before deploying
 
 This file still has **placeholder entity IDs** that only become real once
 devices are paired in Zigbee2MQTT and renamed to match:
 
-- `notify.mobile_app_YOUR_PHONE` — replace with your actual mobile app
-  notify service (Developer Tools > Actions, search "notify").
+- `CABIN_ALERT_NTFY_TOPIC` in FaceoftheCabin's M920q environment must be set.
+  Automations publish `cabin/event/{severity}` and FaceoftheCabin owns the
+  notification destination; no Home Assistant mobile-app service is assumed.
 - Friendly names (`leak_bosch_washer`, `temp_mech_room`,
   `probe_bathroom_wall`, `heater_mech_room`, `light_entry`,
   `deterrent_radio_light`, `router_tripwire_a/b`, `leak_spare_siren`,
